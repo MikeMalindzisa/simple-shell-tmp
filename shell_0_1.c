@@ -1,42 +1,49 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/wait.h>
+#include <stdbool.h>
 
 extern char *__progname;
 
-/* Main function */
-int main(void)
+/* Execute the /bin/ls command without arguments */
+int executeCommand()
 {
-    /* Declare and initialize variables */
-    char *command = NULL;
-    size_t size = 0;
-    char *args[] = {NULL};
-    pid_t pid;
     char *program_path;
+    int status;
 
-    /* Continuous loop */
-    while(1)
+    /* Fork a child process */
+    pid_t pid = fork();
+
+    /* Check for forking error */
+    if (pid < 0)
     {
-        /* Print prompt */
-        printf("$ ");
+        /* Allocate memory for program path */
+        program_path = malloc(strlen(__progname) + 3);
 
-        /* Read user input */
-        if (getline(&command, &size, stdin) == EOF)
-        {
-            putchar('\n');
-            break;
-        }
+        /* Construct program path */
+        strcpy(program_path, "./");
+        strcat(program_path, __progname);
 
-        /* Remove newline character from input */
-        command[strlen(command) - 1] = '\0';
+        /* Print error message */
+        fprintf(stderr, "%s: ", program_path);
+        perror("");
 
-        /* Fork a child process */
-        pid = fork();
+        /* Free allocated memory */
+        free(program_path);
 
-        /* Check for forking error */
-        if (pid < 0)
+        return 1;
+    }
+
+    /* Child process */
+    if (pid == 0)
+    {
+        /* Create arguments array */
+        char *args[] = { "/bin/ls", NULL };
+
+        /* Execute /bin/ls command */
+        if (execve("/bin/ls", args, NULL) == -1)
         {
             /* Allocate memory for program path */
             program_path = malloc(strlen(__progname) + 3);
@@ -52,46 +59,81 @@ int main(void)
             /* Free allocated memory */
             free(program_path);
 
-            /* Return error code */
-            return (1);
+            return 1;
         }
+    }
+    /* Parent process */
+    else
+    {
+        /* Wait for child process to complete */
+        wait(&status);
 
-        /* Child process */
-        if (pid == 0)
+        /* Check if child process exited normally */
+        if (WIFEXITED(status))
         {
-            /* Execute command */
-            if (execve(command, args, NULL) == EOF)
-            {
-                /* Allocate memory for program path */
-                program_path = malloc(strlen(__progname) + 3);
-
-                /* Construct program path */
-                strcpy(program_path, "./");
-                strcat(program_path, __progname);
-
-                /* Print error message */
-                fprintf(stderr, "%s: ", program_path);
-                perror("");
-
-                /* Free allocated memory */
-                free(program_path);
-
-                /* Return error code */
-                return (1);
-            }
-        }
-        /* Parent process */
-        else
-        {
-            /* Wait for child process to complete */
-            wait(NULL);
+            /* Return exit status of child process */
+            return WEXITSTATUS(status);
         }
     }
 
-    /* Free allocated memory */
+    /* Return success code */
+    return 0;
+}
+
+/* Main function */
+int main(void)
+{
+    /* Declare variables */
+    char *command = NULL;
+    size_t bufsize = 0;
+    ssize_t input_length;
+    int status;
+
+    /* Check if running with a terminal */
+    bool interactive = isatty(STDIN_FILENO);
+
+    while (true)
+    {
+        /* Read user input */
+        if (interactive)
+            printf("$ ");
+
+        /* Read user input using getline */
+        input_length = getline(&command, &bufsize, stdin);
+
+        /* Check if getline encountered an error or reached EOF */
+        if (input_length == -1)
+            break;
+
+        /* Remove trailing newline character */
+        if (command[input_length - 1] == '\n')
+            command[input_length - 1] = '\0';
+
+        /* Check if the command is /bin/ls */
+        if (strcmp(command, "/bin/ls") == 0)
+        {
+            /* Execute /bin/ls command */
+            status = executeCommand();
+        }
+        else
+        {
+            /* Print error message */
+            fprintf(stderr, "%s: No such file or directory\n", __progname);
+            continue;
+        }
+
+        /* Check if execution failed */
+        if (status != 0)
+        {
+            /* Print error message */
+            fprintf(stderr, "%s: Command execution failed\n", __progname);
+        }
+    }
+
+    /* Free allocated memory for command */
     free(command);
 
     /* Exit program */
-    return (0);
+    return 0;
 }
 

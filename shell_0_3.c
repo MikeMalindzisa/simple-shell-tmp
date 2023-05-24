@@ -1,147 +1,160 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/wait.h>
+#include <stdbool.h>
 
 extern char *__progname;
-extern char **environ;
 
-/**
- * main - simple shell program
- *
- * Return: Always 0.
- */
-int main(void)
+/* Execute a command with arguments */
+int executeCommand(char *args[])
 {
-    char *command = NULL;
-    size_t size = 0;
-    char **args;
-    pid_t pid;
     char *program_path;
-    int i;
-    char *path_env = getenv("PATH");
-    int found = 0;
+    int status;
 
-    char *path_env_copy;
-    char *path_dir;
-    
-    while (1)
+    /* Fork a child process */
+    pid_t pid = fork();
+
+    /* Check for forking error */
+    if (pid < 0)
     {
-        printf("$ ");
-        /* Reset found variable to 0 */
-        found = 0;
+        /* Allocate memory for program path */
+        program_path = malloc(strlen(__progname) + 3);
 
-        /* Read command line from user input */
-        if (getline(&command, &size, stdin) == EOF)
+        /* Construct program path */
+        strcpy(program_path, "./");
+        strcat(program_path, __progname);
+
+        /* Print error message */
+        fprintf(stderr, "%s: ", program_path);
+        perror("");
+
+        /* Free allocated memory */
+        free(program_path);
+
+        return 1;
+    }
+
+    /* Child process */
+    if (pid == 0)
+    {
+        /* Execute command with arguments */
+        if (execvp(args[0], args) == -1)
         {
-            putchar('\n');
-            break;
-        }
-
-        /* Remove newline character from end of command line */
-        command[strlen(command) - 1] = '\0';
-
-        /* Tokenize command line into arguments */
-        i = 0;
-        args = malloc(sizeof(char *) * (i + 1));
-        args[i] = strtok(command, " ");
-        while (args[i] != NULL)
-        {
-            i++;
-            args = realloc(args, sizeof(char *) * (i + 1));
-            args[i] = strtok(NULL, " ");
-        }
-
-        if (strcmp(command, "/bin/ls") == 0)
-        {
-            found = 1;
-        }
-        else if (strcmp(args[0], "ls") == 0)
-        {
-            if (args[0] == NULL)
-            {
-                break;
-            }
-            /** Search for ls in PATH
-               *make a copy to avoid modifying original */
-            path_env_copy = strdup(path_env); 
-            path_dir = strtok(path_env_copy, ":");
-            while (path_dir != NULL)
-            {
-                program_path = malloc(strlen(path_dir) + strlen(args[0]) + 2);
-                sprintf(program_path, "%s/%s", path_dir, args[0]);
-
-                if (access(program_path, X_OK) == 0)
-                {
-                    found = 1;
-                    args[0] = program_path;
-                    break;
-                }
-                free(program_path);
-                path_dir = strtok(NULL, ":");
-            }
-            free(path_env_copy);
-        }
-
-        if (!found)
-        {
-            /* Print error message if command not found */
-          
-            fprintf(stderr, "%s: command not found\n", args[0]);
-            continue;
-        }
-
-        /* Create child process to execute command */
-        pid = fork();
-        if (pid < 0)
-        {
-            /* Handle fork error
-             * Add space for "./" and NULL terminator
-             */
+            /* Allocate memory for program path */
             program_path = malloc(strlen(__progname) + 3);
+
+            /* Construct program path */
             strcpy(program_path, "./");
             strcat(program_path, __progname);
 
-            /* Print error message with program name and error message */
+            /* Print error message */
             fprintf(stderr, "%s: ", program_path);
             perror("");
 
-            /* Free dynamically allocated memory and exit with failure status */
+            /* Free allocated memory */
             free(program_path);
-            program_path = NULL;
-            exit(EXIT_FAILURE);
 
+            return 1;
         }
-               /* Execute command in child process */
-        if (execve(args[0], args, environ) == -1)
+    }
+    /* Parent process */
+    else
+    {
+        /* Wait for child process to complete */
+        wait(&status);
+
+        /* Check if child process exited normally */
+        if (WIFEXITED(status))
         {
-            /* Handle execve error */
-            /* Add space for "./" and NULL terminator */
-            program_path = malloc(strlen("./") + strlen(args[0]) + 1);
-            sprintf(program_path, "./%s", args[0]);
-
-            /* Print error message with program name and error message */
-            perror(program_path);
-
-            /* Free dynamically allocated memory and exit with failure status */
-            free(program_path);
-            exit(EXIT_FAILURE);
+            /* Return exit status of child process */
+            return WEXITSTATUS(status);
         }
-
-        /* Free dynamically allocated memory */
-        free(program_path);
-        free(args);
-
-        /* Exit child process with success status */
-        exit(EXIT_SUCCESS);
     }
 
-    /* Wait for child processes to complete */
-    while (wait(NULL) > 0);
+    /* Return success code */
+    return 0;
+}
 
-    /* Free dynamically allocated memory and exit with success status */
+/* Main function */
+int main(void)
+{
+    /* Declare variables */
+    char *command = NULL;
+    size_t bufsize = 0;
+    ssize_t input_length;
+    int status;
+    char *token;
+    char *args[256];
+    int arg_index = 0;
+
+    /* Check if running with a terminal */
+    bool interactive = isatty(STDIN_FILENO);
+
+    while (true)
+    {
+        /* Read user input */
+        if (interactive)
+            printf("$ ");
+
+        /* Read user input using getline */
+        input_length = getline(&command, &bufsize, stdin);
+
+        /* Check if getline encountered an error or reached EOF */
+        if (input_length == -1)
+            break;
+
+        /* Remove trailing newline character */
+        if (command[input_length - 1] == '\n')
+            command[input_length - 1] = '\0';
+
+        /* Tokenize the command and arguments */
+
+        token = strtok(command, " ");
+
+        /* Extract the command and arguments */
+        while (token != NULL && arg_index < 255)
+        {
+            args[arg_index++] = token;
+            token = strtok(NULL, " ");
+        }
+        args[arg_index] = NULL;
+
+        /* Check if the command is ls or /bin/ls */
+        if (strcmp(args[0], "ls") == 0)
+        {
+            args[0] = "/bin/ls";
+        }
+
+        /* Check if the command exists in the PATH */
+        if (access(args[0], F_OK) == 0)
+        {
+            /* Execute command with arguments */
+            status = executeCommand(args);
+        }
+        else
+        {
+            /* Print error message */
+            fprintf(stderr, "%s: Command not found: %s\n", __progname, args[0]);
+            continue;
+        }
+
+        /* Check if execution failed */
+        if (status != 0)
+        {
+            /* Print error message */
+            fprintf(stderr, "%s: Command execution failed\n", __progname);
+        }
+
+        /* Reset argument index */
+        arg_index = 0;
+    }
+
+    /* Free allocated memory for command */
     free(command);
-    return (0);
+
+    /* Exit program */
+    return 0;
 }
 

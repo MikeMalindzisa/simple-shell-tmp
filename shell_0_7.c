@@ -7,6 +7,68 @@
 
 extern char *__progname;
 
+#define BUFFER_SIZE 256
+
+/* Custom getline function */
+ssize_t custom_getline(char **lineptr, size_t *n)
+{
+    static char buffer[BUFFER_SIZE];
+    static size_t buffer_index = 0;
+    static ssize_t bytes_read = 0;
+    static bool newline_flag = false;
+    char current_char;
+    ssize_t chars_read = 0;
+    ssize_t total_chars_read = 0;
+
+    if (*lineptr == NULL || *n == 0)
+    {
+        *lineptr = malloc(BUFFER_SIZE);
+        *n = BUFFER_SIZE;
+    }
+
+    while (true)
+    {
+        if (buffer_index == (size_t)bytes_read)
+        {
+            buffer_index = 0;
+            bytes_read = read(STDIN_FILENO, buffer, BUFFER_SIZE);
+            if (bytes_read <= 0)
+            {
+                if (total_chars_read == 0)
+                    return -1;
+                else
+                    break;
+            }
+        }
+
+        current_char = buffer[buffer_index++];
+        (*lineptr)[chars_read++] = current_char;
+        total_chars_read++;
+
+        if (current_char == '\n')
+        {
+            newline_flag = true;
+            break;
+        }
+
+        if ((size_t)chars_read == *n - 1)
+        {
+            *n += BUFFER_SIZE;
+            *lineptr = realloc(*lineptr, *n);
+        }
+    }
+
+    (*lineptr)[chars_read] = '\0';
+
+    if (newline_flag)
+    {
+        newline_flag = false;
+        return chars_read;
+    }
+
+    return -1;
+}
+
 /* Execute a command with arguments */
 int executeCommand(char *args[])
 {
@@ -40,7 +102,7 @@ int executeCommand(char *args[])
     if (pid == 0)
     {
         /* Execute command with arguments */
-        if (execve(args[0], args, NULL) == -1)
+        if (execvp(args[0], args) == -1)
         {
             /* Allocate memory for program path */
             program_path = malloc(strlen(__progname) + 3);
@@ -77,6 +139,31 @@ int executeCommand(char *args[])
     return 0;
 }
 
+/* Tokenize the input command and arguments */
+void tokenizeInput(char *command, char *args[], int *arg_count)
+{
+    int arg_index = 0;
+    bool read_arg = false;
+    int i = 0;
+
+    for (; command[i] != '\0'; i++)
+    {
+        if (command[i] != ' ' && command[i] != '\t' && !read_arg)
+        {
+            args[arg_index++] = &command[i];
+            read_arg = true;
+        }
+        else if ((command[i] == ' ' || command[i] == '\t') && read_arg)
+        {
+            command[i] = '\0';
+            read_arg = false;
+        }
+    }
+
+    args[arg_index] = NULL;
+    *arg_count = arg_index;
+}
+
 /* Main function */
 int main(void)
 {
@@ -84,10 +171,8 @@ int main(void)
     char *command = NULL;
     size_t bufsize = 0;
     ssize_t input_length;
-    int status;
-    char *token;
     char *args[256];
-    int arg_index = 0;
+    int arg_count;
 
     /* Check if running with a terminal */
     bool interactive = isatty(STDIN_FILENO);
@@ -97,9 +182,11 @@ int main(void)
         /* Read user input */
         if (interactive)
             printf("$ ");
+        /* Force output the output buffer */
+        fflush(stdout);
 
-        /* Read user input using getline */
-        input_length = getline(&command, &bufsize, stdin);
+        /* Read user input using custom getline */
+        input_length = custom_getline(&command, &bufsize);
 
         /* Check if getline encountered an error or reached EOF */
         if (input_length == -1)
@@ -110,43 +197,24 @@ int main(void)
             command[input_length - 1] = '\0';
 
         /* Tokenize the command and arguments */
-
-        token = strtok(command, " ");
-
-        /* Extract the command and arguments */
-        while (token != NULL && arg_index < 255)
-        {
-            args[arg_index++] = token;
-            token = strtok(NULL, " ");
-        }
-        args[arg_index] = NULL;
+        tokenizeInput(command, args, &arg_count);
 
         /* Check if the command is ls or /bin/ls */
-        if (strcmp(args[0], "ls") == 0){
+        if (strcmp(args[0], "ls") == 0)
+        {
             args[0] = "/bin/ls";
         }
-        if (strcmp(args[0], "/bin/ls") == 0)
+        else if (strcmp(args[0], "exit") == 0)
         {
-            /* Execute command with arguments */
-            status = executeCommand(args);
-        }
-        else
-        {
-            /* Print error message */
-            fprintf(stderr, "%s: No such file or directory\n", __progname);
-            continue;
+            /* Free allocated memory for command */
+            free(command);
+
+            /* Exit program */
+            return 0;
         }
 
-
-        /* Check if execution failed */
-        if (status != 0)
-        {
-            /* Print error message */
-            fprintf(stderr, "%s: Command execution failed\n", __progname);
-        }
-
-        /* Reset argument index */
-        arg_index = 0;
+        /* Execute command with arguments */
+        executeCommand(args);
     }
 
     /* Free allocated memory for command */

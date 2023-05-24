@@ -6,7 +6,6 @@
 #include <stdbool.h>
 
 extern char *__progname;
-
 /* Execute a command with arguments */
 int executeCommand(char *args[])
 {
@@ -40,7 +39,7 @@ int executeCommand(char *args[])
     if (pid == 0)
     {
         /* Execute command with arguments */
-        if (execve(args[0], args, NULL) == -1)
+        if (execvp(args[0], args) == -1)
         {
             /* Allocate memory for program path */
             program_path = malloc(strlen(__progname) + 3);
@@ -122,21 +121,21 @@ int main(void)
         args[arg_index] = NULL;
 
         /* Check if the command is ls or /bin/ls */
-        if (strcmp(args[0], "ls") == 0){
+        if (strcmp(args[0], "ls") == 0)
+        {
             args[0] = "/bin/ls";
         }
-        if (strcmp(args[0], "/bin/ls") == 0)
+        else if (strcmp(args[0], "exit") == 0)
         {
-            /* Execute command with arguments */
-            status = executeCommand(args);
-        }
-        else
-        {
-            /* Print error message */
-            fprintf(stderr, "%s: No such file or directory\n", __progname);
-            continue;
+            /* Free allocated memory for command */
+            free(command);
+
+            /* Exit program */
+            return 0;
         }
 
+        /* Execute command with arguments */
+        status = executeCommand(args);
 
         /* Check if execution failed */
         if (status != 0)
